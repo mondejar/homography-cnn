@@ -1,3 +1,4 @@
+#!/usr/bin/python
 ################################################################################
 #
 # Author: V. Mondejar-Guerra
@@ -12,6 +13,8 @@ from os import listdir
 from os.path import isfile, join
 import os
 import random
+import sys
+
 
 """ 
 This code prepares the data for train the model.
@@ -19,18 +22,24 @@ Given a directory with the images this code creates for each image:
 	- I1 a patch of size NxN
 	- I2 a patch of size NxN that is a perspective transformation of I1
 	- The 4 coordinates in I2 that enclose I1
-"""
+
 	    		
+
+python dataset_path max_number_images number_transformations patch_size
+				
+Example call:
+
+python create_dataset.py ../mirflickr/ 1000 5 128
+
+"""
+
 # Params
-imDatasetPath = 'data/image_dataset/'  # Dir that contains the original images
 outImPath = 'data/train_data/'		   # Dir in which the new patches are saved
 trainFilename = 'data/train_data_list.txt' # Full file path referencing the patches and ground truth
-numWarps = 7 # number of warps per image
-patchSize = 128
 verbose = False # set True to display the process
 
 # Generate a random affine transform over the four corners
-def affine_transform( patchSize, fullIm, width, height, randomDispFactor ):
+def affine_transform( patchSize, img, width, height, randomDispFactor ):
 	
 	w = int(round(randomDispFactor * patchSize))
 	h = int(round(randomDispFactor * patchSize))
@@ -50,123 +59,142 @@ def affine_transform( patchSize, fullIm, width, height, randomDispFactor ):
 
 	return warpImg, persT
 
-####################################################################
-# main
 
-# create file
-fileList = open(trainFilename,'w') 
-imFiles = [f for f in listdir(imDatasetPath) if isfile(join(imDatasetPath, f))]
+def main(argv):
 
-numIm = 0
-for imFile in imFiles:
+	if len(argv) < 5:
+		print 'Error, incorrect number of args:\n python dataset_path max_number_images number_transformations patch_size\n'
+		sys.exit(1)
 
-	# Read image
-	img = cv2.imread(imDatasetPath + imFile, 0)
-	print 'Load: ', imDatasetPath + imFile	, ' ...'
+	if not os.path.exists(outImPath):
+		os.mkdir(outImPath)
 
-	# for each 
-	height, width = img.shape[:2]
+	imDatasetPath = argv[1]  # Dir that contains the original images
+	maxImg = int(argv[2])
+	numWarps = int(argv[3]) # number of warps per image
+	patchSize =  int(argv[4]) # patch size 
 
-	x1 = (width/2)- (patchSize/2)
-	x2 = (width/2) + patchSize/2
-	y1 = (height/2)- (patchSize/2)
-	y2 = (height/2) + patchSize/2
+	# create file
+	fileList = open(trainFilename,'w') 
+	imFiles = [f for f in listdir(imDatasetPath) if isfile(join(imDatasetPath, f))]
 
-	patchLocation = np.float32( [ [x1, y1], [x2, y1], [x2, y2], [x1, y2]])
-	patchLocation = np.array([patchLocation])
-	patch_I1 = img[y1:y2, x1:x2] # Crop from x, y, w, h -> 100, 200, 300, 400
-	namePatchI1 = outImPath + str(numIm) + '_I1' + '.png'
-	cv2.imwrite( namePatchI1, patch_I1)	
+	numIm = 0
+	for imFile in imFiles:
+		if numIm >= maxImg:
+			sys.exit(1)
+		# Read image
+		img = cv2.imread(imDatasetPath + imFile, 0)
+		if not img is None:
 
-	for nW in range(0, numWarps):
-	# Perform several transformations for the same image
-	# in order to the network learn different corner outputs for the same patch I1
+			# for each 
+			height, width = img.shape[:2]
+			if height > patchSize * 3 and width > patchSize * 3:
+				print str(numIm), ' Load: ', imDatasetPath + imFile
+				x1 = (width/2)- (patchSize/2)
+				x2 = (width/2) + patchSize/2
+				y1 = (height/2)- (patchSize/2)
+				y2 = (height/2) + patchSize/2
 
-		# Extract a patch in the center of size 128x128
-		# Perform the 4-corner perspective change!
-		warpImg, Hom = affine_transform(patchSize, img, width, height, 0.05)		
-		
-		## Check the perspective computation!
-		patchHom = cv2.perspectiveTransform(patchLocation, Hom)
+				patchLocation = np.float32( [ [x1, y1], [x2, y1], [x2, y2], [x1, y2]])
+				patchLocation = np.array([patchLocation])
+				patch_I1 = img[y1:y2, x1:x2] # Crop from x, y, w, h -> 100, 200, 300, 400
+				namePatchI1 = outImPath + str(numIm) + '_I1' + '.png'
+				cv2.imwrite( namePatchI1, patch_I1)	
 
-		# Generate some extra offset on the I2 coordinates
-		# This factor will make the extra margin on I2 bigger
-		randomDispFactor = 0.7
-		x1_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
-		x2_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
-		y1_off = x1_off
-		y2_off = x2_off
-		#y1_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
-		#y2_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
+				for nW in range(0, numWarps):
+					# Perform several transformations for the same image, 
+					# in order to make the network learn different corner outputs
+					# from the same patch I1
 
-		patchHom[0][0][0] = patchHom[0][0][0] - x1_off
-		patchHom[0][0][1] = patchHom[0][0][1] - y1_off
-		patchHom[0][1][0] = patchHom[0][1][0] + x2_off
-		patchHom[0][1][1] = patchHom[0][1][1] - y1_off
-		patchHom[0][2][0] = patchHom[0][2][0] + x2_off
-		patchHom[0][2][1] = patchHom[0][2][1] + y2_off
-		patchHom[0][3][0] = patchHom[0][3][0] - x1_off
-		patchHom[0][3][1] = patchHom[0][3][1] + y2_off
-		
-		xh1, yh1 = patchHom[0].min(0)
-		xh2, yh2 = patchHom[0].max(0)
-		xh1 = int(round(xh1))
-		xh2 = int(round(xh2))
-		yh1 = int(round(yh1))
-		yh2 = int(round(yh2))
+					# Extract a patch in the center of size 128x128
+					# Perform the 4-corner perspective change!
+					warpImg, Hom = affine_transform(patchSize, img, width, height, 0.05)		
+					patchHom = cv2.perspectiveTransform(patchLocation, Hom)
 
-		#print '\n Y[', yh1, ':', yh2, ']  X [', xh1, ':', xh2, ']'
-		patch_I2 = warpImg[yh1:yh2, xh1:xh2]
-		wh = xh2 - xh1
-		hh = yh2 - yh1
+					# Generate some extra offset on the I2 coordinates
+					# This factor will make the extra margin on I2 bigger
+					randomDispFactor = 0.7
+					x1_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
+					x2_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
+					y1_off = x1_off
+					y2_off = x2_off
+					#y1_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
+					#y2_off = int(round(randomDispFactor * patchSize))  * (random.uniform(1, 100) / 100)
 
-		gtCorner = np.float32([[1, 1], [1, 1], [1, 1], [1, 1]])
-		gtCorner[0] = np.float32([(patchHom[0][0][0] - xh1) + x1_off     , (patchHom[0][0][1] - yh1) + y1_off])
-		gtCorner[1] = np.float32([wh - (xh2 - patchHom[0][1][0]) - x2_off, (patchHom[0][1][1] - yh1) + y1_off])
-		gtCorner[2] = np.float32([wh - (xh2 - patchHom[0][2][0]) - x2_off, hh - (yh2 - patchHom[0][2][1]) - y2_off])
-		gtCorner[3] = np.float32([(patchHom[0][3][0] - xh1) + x1_off     , hh - (yh2 - patchHom[0][3][1]) - y2_off])
+					patchHom[0][0][0] = patchHom[0][0][0] - x1_off
+					patchHom[0][0][1] = patchHom[0][0][1] - y1_off
+					patchHom[0][1][0] = patchHom[0][1][0] + x2_off
+					patchHom[0][1][1] = patchHom[0][1][1] - y1_off
+					patchHom[0][2][0] = patchHom[0][2][0] + x2_off
+					patchHom[0][2][1] = patchHom[0][2][1] + y2_off
+					patchHom[0][3][0] = patchHom[0][3][0] - x1_off
+					patchHom[0][3][1] = patchHom[0][3][1] + y2_off
+					
+					xh1, yh1 = patchHom[0].min(0)
+					xh2, yh2 = patchHom[0].max(0)
+					xh1 = int(round(xh1))
+					xh2 = int(round(xh2))
+					yh1 = int(round(yh1))
+					yh2 = int(round(yh2))
 
-		fs_x = float(patchSize) / float(wh)
-		fs_y = float(patchSize) / float(hh)
-		for p in range(0, 4):
-			gtCorner[p][0] = int(round(gtCorner[p][0] * fs_x))
-			gtCorner[p][1] = int(round(gtCorner[p][1] * fs_y))
+					#print '\n Y[', yh1, ':', yh2, ']  X [', xh1, ':', xh2, ']'
+					patch_I2 = warpImg[yh1:yh2, xh1:xh2]
+					wh = xh2 - xh1
+					hh = yh2 - yh1
 
-		# Scale patch_I2 to patchSize and adjust the gtCorners!
-		patch_I2 = cv2.resize(patch_I2, (patchSize, patchSize))
+					gtCorner = np.float32([[1, 1], [1, 1], [1, 1], [1, 1]])
+					gtCorner[0] = np.float32([(patchHom[0][0][0] - xh1) + x1_off     , (patchHom[0][0][1] - yh1) + y1_off])
+					gtCorner[1] = np.float32([wh - (xh2 - patchHom[0][1][0]) - x2_off, (patchHom[0][1][1] - yh1) + y1_off])
+					gtCorner[2] = np.float32([wh - (xh2 - patchHom[0][2][0]) - x2_off, hh - (yh2 - patchHom[0][2][1]) - y2_off])
+					gtCorner[3] = np.float32([(patchHom[0][3][0] - xh1) + x1_off     , hh - (yh2 - patchHom[0][3][1]) - y2_off])
 
-		# Apply more changes
-		# Blurring
-		# Illumination and contrast
-		# Occlusion??
-		# ...
+					fs_x = float(patchSize) / float(wh)
+					fs_y = float(patchSize) / float(hh)
+					for p in range(0, 4):
+						gtCorner[p][0] = int(round(gtCorner[p][0] * fs_x))
+						gtCorner[p][1] = int(round(gtCorner[p][1] * fs_y))
 
-		# Export patch warp
-		namePatchI2 = outImPath + str(numIm) + '_I' + str(nW + 2) + '.png'
-		cv2.imwrite( namePatchI2, patch_I2)	
+					# Scale patch_I2 to patchSize and adjust the gtCorners!
+					patch_I2 = cv2.resize(patch_I2, (patchSize, patchSize))
 
-		# add line to file
-		fileList.write( namePatchI1 + ' ' + namePatchI2)
-		for p in range(0, 4):
-			fileList.write(' ' + str(gtCorner[p][0]) + ' ' + str(gtCorner[p][1]))
-		fileList.write('\n')
+					# TODO Apply more changes:
+					# - Blurring
+					# - Illumination 
+					# - Occlusion??
+					# - ...
+					
+					# Export patch warp
+					namePatchI2 = outImPath + str(numIm) + '_I' + str(nW + 2) + '.png'
+					cv2.imwrite( namePatchI2, patch_I2)	
 
-		if verbose:
-			cv2.polylines(img,  np.int32(patchLocation), 1, 255, 7)
-			cv2.polylines(warpImg,  np.int32(patchHom), 1, 0, 4)
-			#cv2.imshow('full image', img)
-			#cv2.imshow('full image warped', warpImg)
+					# add line to file
+					fileList.write( namePatchI1 + ' ' + namePatchI2)
+					gtCorner = gtCorner / patchSize
+					for p in range(0, 4):
+						
+						fileList.write(' ' + str(gtCorner[p][0]) + ' ' + str(gtCorner[p][1]))
+					fileList.write('\n')
 
-			for p in range(0, 4):	
-				print p, ': ', gtCorner[p]
-				cv2.circle(patch_I2, (gtCorner[p][0], gtCorner[p][1]), 5, 255, 1)
+					if verbose:
+						cv2.polylines(img,  np.int32(patchLocation), 1, 255, 7)
+						cv2.polylines(warpImg,  np.int32(patchHom), 1, 0, 4)
+						#cv2.imshow('full image', img)
+						#cv2.imshow('full image warped', warpImg)
 
-			cv2.imshow('I1', patch_I1)
-			cv2.imshow('I2', patch_I2)
-			cv2.waitKey(0)
-			cv2.destroyAllWindows()
+						for p in range(0, 4):	
+							print p, ': ', gtCorner[p] 
+							cv2.circle(patch_I2, (int(round(gtCorner[p][0] * patchSize)), int(round(gtCorner[p][1] * patchSize))), 5, 255, 1)
 
-	numIm = numIm + 1
+						cv2.imshow('I1', patch_I1)
+						cv2.imshow('I2', patch_I2)
+						cv2.waitKey(0)
+						cv2.destroyAllWindows()
 
-fileList.close()
+				numIm = numIm + 1
 
+	fileList.close()
+
+
+
+if __name__ == "__main__":
+    main(sys.argv)

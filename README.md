@@ -1,6 +1,6 @@
 # Introduction
 
-The idea of this work is similar to: https://arxiv.org/abs/1606.03798
+The idea of this work is based on: https://arxiv.org/abs/1606.03798
 
 - [Objective](#objetive)
   - [Training Dataset](#training-dataset)
@@ -23,8 +23,10 @@ In other words, this work tries to find the homography between I1 and I2.
 
 To train this model we need thousands of samples.
 
-2 Additionaly we could simple use some image dataset (MIRFLCKR, IMAGENET) and for each image perform some 
-random changes, including perspective transformations, illumination, blurring changes...
+For that purpose the [MIRFLICKR-25000](http://press.liacs.nl/mirflickr/mirdownload.html) is used. 
+For each image some perspective transformations are made.
+Additionally illumination, blurring and even occlusion changes could be added to make the model
+more robust.
 
 The input training data consist in:
 - Two images of size (128 x 128)
